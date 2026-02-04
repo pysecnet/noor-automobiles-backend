@@ -11,7 +11,7 @@ router.post('/', [
   body('message').trim().notEmpty().withMessage('Message is required'),
   body('phone').optional().trim(),
   body('car_id').optional().isInt()
-], async (req, res) => {
+], (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -22,13 +22,13 @@ router.post('/', [
   try {
     // Verify car exists if car_id provided
     if (car_id) {
-      const car = await query.get('SELECT id FROM cars WHERE id = ?', [car_id]);
+      const car = query.get('SELECT id FROM cars WHERE id = ?', [car_id]);
       if (!car) {
         return res.status(400).json({ message: 'Invalid car reference' });
       }
     }
 
-    const result = await query.run(`
+    const result = query.run(`
       INSERT INTO inquiries (name, email, phone, car_id, message)
       VALUES (?, ?, ?, ?, ?)
     `, [name, email, phone || null, car_id || null, message]);
@@ -44,7 +44,7 @@ router.post('/', [
 });
 
 // Get all inquiries (admin only)
-router.get('/', authenticateToken, isAdmin, async (req, res) => {
+router.get('/', authenticateToken, isAdmin, (req, res) => {
   try {
     const { status } = req.query;
     
@@ -62,7 +62,7 @@ router.get('/', authenticateToken, isAdmin, async (req, res) => {
     
     sql += ' ORDER BY i.created_at DESC';
 
-    const inquiries = await query.all(sql, params);
+    const inquiries = query.all(sql, params);
 
     res.json(inquiries);
   } catch (error) {
@@ -74,7 +74,7 @@ router.get('/', authenticateToken, isAdmin, async (req, res) => {
 // Update inquiry status (admin only)
 router.put('/:id', authenticateToken, isAdmin, [
   body('status').isIn(['pending', 'contacted', 'closed']).withMessage('Invalid status')
-], async (req, res) => {
+], (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -84,12 +84,12 @@ router.put('/:id', authenticateToken, isAdmin, [
   const inquiryId = req.params.id;
 
   try {
-    const inquiry = await query.get('SELECT id FROM inquiries WHERE id = ?', [inquiryId]);
+    const inquiry = query.get('SELECT id FROM inquiries WHERE id = ?', [inquiryId]);
     if (!inquiry) {
       return res.status(404).json({ message: 'Inquiry not found' });
     }
 
-    await query.run('UPDATE inquiries SET status = ? WHERE id = ?', [status, inquiryId]);
+    query.run('UPDATE inquiries SET status = ? WHERE id = ?', [status, inquiryId]);
 
     res.json({ message: 'Inquiry status updated' });
   } catch (error) {
@@ -99,14 +99,14 @@ router.put('/:id', authenticateToken, isAdmin, [
 });
 
 // Delete inquiry (admin only)
-router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
+router.delete('/:id', authenticateToken, isAdmin, (req, res) => {
   try {
-    const inquiry = await query.get('SELECT id FROM inquiries WHERE id = ?', [req.params.id]);
+    const inquiry = query.get('SELECT id FROM inquiries WHERE id = ?', [req.params.id]);
     if (!inquiry) {
       return res.status(404).json({ message: 'Inquiry not found' });
     }
 
-    await query.run('DELETE FROM inquiries WHERE id = ?', [req.params.id]);
+    query.run('DELETE FROM inquiries WHERE id = ?', [req.params.id]);
     
     res.json({ message: 'Inquiry deleted successfully' });
   } catch (error) {
@@ -116,15 +116,15 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
 });
 
 // Get dashboard stats (admin only)
-router.get('/stats/dashboard', authenticateToken, isAdmin, async (req, res) => {
+router.get('/stats/dashboard', authenticateToken, isAdmin, (req, res) => {
   try {
-    const totalCars = (await query.get('SELECT COUNT(*) as count FROM cars'))?.count || 0;
-    const availableCars = (await query.get("SELECT COUNT(*) as count FROM cars WHERE status = 'available'"))?.count || 0;
-    const soldCars = (await query.get("SELECT COUNT(*) as count FROM cars WHERE status = 'sold'"))?.count || 0;
-    const reservedCars = (await query.get("SELECT COUNT(*) as count FROM cars WHERE status = 'reserved'"))?.count || 0;
-    const totalInquiries = (await query.get('SELECT COUNT(*) as count FROM inquiries'))?.count || 0;
-    const pendingInquiries = (await query.get("SELECT COUNT(*) as count FROM inquiries WHERE status = 'pending'"))?.count || 0;
-    const totalUsers = (await query.get('SELECT COUNT(*) as count FROM users'))?.count || 0;
+    const totalCars = query.get('SELECT COUNT(*) as count FROM cars')?.count || 0;
+    const availableCars = query.get("SELECT COUNT(*) as count FROM cars WHERE status = 'available'")?.count || 0;
+    const soldCars = query.get("SELECT COUNT(*) as count FROM cars WHERE status = 'sold'")?.count || 0;
+    const reservedCars = query.get("SELECT COUNT(*) as count FROM cars WHERE status = 'reserved'")?.count || 0;
+    const totalInquiries = query.get('SELECT COUNT(*) as count FROM inquiries')?.count || 0;
+    const pendingInquiries = query.get("SELECT COUNT(*) as count FROM inquiries WHERE status = 'pending'")?.count || 0;
+    const totalUsers = query.get('SELECT COUNT(*) as count FROM users')?.count || 0;
 
     res.json({
       totalCars,

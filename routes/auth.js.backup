@@ -12,7 +12,7 @@ router.post('/register', [
   body('email').isEmail().withMessage('Valid email is required'),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
   body('phone').optional().trim()
-], async (req, res) => {
+], (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -22,7 +22,7 @@ router.post('/register', [
 
   try {
     // Check if user exists
-    const existingUser = await query.get('SELECT id FROM users WHERE email = ?', [email]);
+    const existingUser = query.get('SELECT id FROM users WHERE email = ?', [email]);
     if (existingUser) {
       return res.status(400).json({ message: 'Email already registered' });
     }
@@ -31,7 +31,7 @@ router.post('/register', [
     const hashedPassword = bcrypt.hashSync(password, 10);
 
     // Insert user
-    const result = await query.run(
+    const result = query.run(
       'INSERT INTO users (name, email, password, phone, role) VALUES (?, ?, ?, ?, ?)',
       [name, email, hashedPassword, phone || null, 'user']
     );
@@ -63,7 +63,7 @@ router.post('/register', [
 router.post('/login', [
   body('email').isEmail().withMessage('Valid email is required'),
   body('password').notEmpty().withMessage('Password is required')
-], async (req, res) => {
+], (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -73,7 +73,7 @@ router.post('/login', [
 
   try {
     // Find user
-    const user = await query.get('SELECT * FROM users WHERE email = ?', [email]);
+    const user = query.get('SELECT * FROM users WHERE email = ?', [email]);
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -116,7 +116,7 @@ router.get('/me', authenticateToken, (req, res) => {
 router.put('/profile', authenticateToken, [
   body('name').optional().trim().notEmpty(),
   body('phone').optional().trim()
-], async (req, res) => {
+], (req, res) => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     return res.status(400).json({ errors: errors.array() });
@@ -126,13 +126,13 @@ router.put('/profile', authenticateToken, [
 
   try {
     if (name) {
-      await query.run('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name, req.user.id]);
+      query.run('UPDATE users SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [name, req.user.id]);
     }
     if (phone !== undefined) {
-      await query.run('UPDATE users SET phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [phone, req.user.id]);
+      query.run('UPDATE users SET phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [phone, req.user.id]);
     }
 
-    const updatedUser = await query.get('SELECT id, name, email, phone, role FROM users WHERE id = ?', [req.user.id]);
+    const updatedUser = query.get('SELECT id, name, email, phone, role FROM users WHERE id = ?', [req.user.id]);
     
     res.json({ message: 'Profile updated', user: updatedUser });
   } catch (error) {

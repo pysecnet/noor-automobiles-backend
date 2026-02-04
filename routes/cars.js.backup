@@ -1,13 +1,72 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const { query } = require('../config/database');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 
+// Configure multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../uploads/cars');
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|webp|gif|mp4|webm|mov/;
+  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = allowedTypes.test(file.mimetype);
+  
+  if (extname && mimetype) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only images (jpeg, jpg, png, webp, gif) and videos (mp4, webm, mov) are allowed'));
+  }
+};
+
+const upload = multer({
+  storage,
+  fileFilter,
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB max
+});
+
+// Upload files endpoint
+router.post('/upload', authenticateToken, isAdmin, upload.array('files', 10), (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: 'No files uploaded' });
+    }
+
+    const fileUrls = req.files.map(file => {
+      const isVideo = /mp4|webm|mov/.test(path.extname(file.originalname).toLowerCase());
+      return {
+        url: `/uploads/cars/${file.filename}`,
+        type: isVideo ? 'video' : 'image',
+        originalName: file.originalname
+      };
+    });
+
+    res.json({ message: 'Files uploaded successfully', files: fileUrls });
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ message: 'Error uploading files' });
+  }
+});
+
 // Get all cars (public)
 router.get('/', (req, res) => {
   try {
-    const { brand, status, featured, search } = req.query;
+    const { brand, status, featured, search, upcoming } = req.query;
     
     let sql = 'SELECT * FROM cars WHERE 1=1';
     const params = [];
@@ -26,6 +85,11 @@ router.get('/', (req, res) => {
       sql += ' AND featured = 1';
     }
 
+    if (upcoming === 'true') {
+      sql += ' AND status = ?';
+      params.push('upcoming');
+    }
+
     if (search) {
       sql += ' AND (title LIKE ? OR brand LIKE ? OR model LIKE ? OR description LIKE ?)';
       const searchTerm = `%${search}%`;
@@ -40,7 +104,8 @@ router.get('/', (req, res) => {
     const parsedCars = cars.map(car => ({
       ...car,
       features: JSON.parse(car.features || '[]'),
-      images: JSON.parse(car.images || '[]')
+      images: JSON.parse(car.images || '[]'),
+      videos: JSON.parse(car.videos || '[]')
     }));
 
     res.json(parsedCars);
@@ -59,9 +124,9 @@ router.get('/:id', (req, res) => {
       return res.status(404).json({ message: 'Car not found' });
     }
 
-    // Parse JSON fields
     car.features = JSON.parse(car.features || '[]');
     car.images = JSON.parse(car.images || '[]');
+    car.videos = JSON.parse(car.videos || '[]');
 
     res.json(car);
   } catch (error) {
@@ -95,23 +160,24 @@ router.post('/', authenticateToken, isAdmin, [
 
   const {
     title, brand, model, year, mileage, engine, transmission,
-    fuel_type, color, body_type, description, features, images, status, featured
+    fuel_type, color, body_type, description, features, images, videos, status, featured
   } = req.body;
 
   try {
     const result = query.run(`
-      INSERT INTO cars (title, brand, model, year, mileage, engine, transmission, fuel_type, color, body_type, description, features, images, status, featured)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO cars (title, brand, model, year, mileage, engine, transmission, fuel_type, color, body_type, description, features, images, videos, status, featured)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       title, brand, model, year, mileage || null, engine || null, transmission || null,
       fuel_type || null, color || null, body_type || null, description || null,
-      JSON.stringify(features || []), JSON.stringify(images || []),
+      JSON.stringify(features || []), JSON.stringify(images || []), JSON.stringify(videos || []),
       status || 'available', featured ? 1 : 0
     ]);
 
     const newCar = query.get('SELECT * FROM cars WHERE id = ?', [result.lastInsertRowid]);
     newCar.features = JSON.parse(newCar.features || '[]');
     newCar.images = JSON.parse(newCar.images || '[]');
+    newCar.videos = JSON.parse(newCar.videos || '[]');
 
     res.status(201).json({ message: 'Car added successfully', car: newCar });
   } catch (error) {
@@ -124,7 +190,6 @@ router.post('/', authenticateToken, isAdmin, [
 router.put('/:id', authenticateToken, isAdmin, (req, res) => {
   const carId = req.params.id;
   
-  // Check if car exists
   const existingCar = query.get('SELECT id FROM cars WHERE id = ?', [carId]);
   if (!existingCar) {
     return res.status(404).json({ message: 'Car not found' });
@@ -132,11 +197,10 @@ router.put('/:id', authenticateToken, isAdmin, (req, res) => {
 
   const {
     title, brand, model, year, mileage, engine, transmission,
-    fuel_type, color, body_type, description, features, images, status, featured
+    fuel_type, color, body_type, description, features, images, videos, status, featured
   } = req.body;
 
   try {
-    // Build update query dynamically
     const updates = [];
     const params = [];
     
@@ -153,6 +217,7 @@ router.put('/:id', authenticateToken, isAdmin, (req, res) => {
     if (description !== undefined) { updates.push('description = ?'); params.push(description); }
     if (features !== undefined) { updates.push('features = ?'); params.push(JSON.stringify(features)); }
     if (images !== undefined) { updates.push('images = ?'); params.push(JSON.stringify(images)); }
+    if (videos !== undefined) { updates.push('videos = ?'); params.push(JSON.stringify(videos)); }
     if (status !== undefined) { updates.push('status = ?'); params.push(status); }
     if (featured !== undefined) { updates.push('featured = ?'); params.push(featured ? 1 : 0); }
     
@@ -164,6 +229,7 @@ router.put('/:id', authenticateToken, isAdmin, (req, res) => {
     const updatedCar = query.get('SELECT * FROM cars WHERE id = ?', [carId]);
     updatedCar.features = JSON.parse(updatedCar.features || '[]');
     updatedCar.images = JSON.parse(updatedCar.images || '[]');
+    updatedCar.videos = JSON.parse(updatedCar.videos || '[]');
 
     res.json({ message: 'Car updated successfully', car: updatedCar });
   } catch (error) {
