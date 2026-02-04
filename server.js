@@ -40,14 +40,14 @@ const startServer = async () => {
     app.use('/api/inquiries', inquiriesRoutes);
 
     // Serve static files from React app in production
-    if (process.env.NODE_ENV === 'production') {
+/*    if (process.env.NODE_ENV === 'production') {
       app.use(express.static(path.join(__dirname, '../frontend/dist')));
       
       app.get('*', (req, res) => {
         res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
       });
     }
-
+*/
     // Error handling middleware
     app.use((err, req, res, next) => {
       console.error(err.stack);
