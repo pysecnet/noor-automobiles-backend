@@ -16,7 +16,16 @@ const db = createClient({
 });
 
 // 2. MIDDLEWARE
-app.use(cors()); // Critical: Allows your Vercel site to talk to this API
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://frontend-sable-zeta-68.vercel.app',
+    'https://noorautomobiles.com',
+    'https://www.noorautomobiles.com'
+  ],
+  credentials: true
+}));// Critical: Allows your Vercel site to talk to this API
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
