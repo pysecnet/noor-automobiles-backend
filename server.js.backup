@@ -2,69 +2,99 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-
-const { initializeDatabase } = require('./config/database');
+const { createClient } = require('@libsql/client');
 
 const app = express();
+// Render assigns a port automatically; 5000 is for your local testing
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// 1. TURSO DATABASE CONNECTION
+// We use process.env to keep your token safe on GitHub
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL,
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
+
+// 2. MIDDLEWARE
+app.use(cors({
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://frontend-sable-zeta-68.vercel.app',
+    'https://noorautomobiles.com',
+    'https://www.noorautomobiles.com'
+  ],
+  credentials: true
+}));// Critical: Allows your Vercel site to talk to this API
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Static files for uploaded images
+// Serve the uploads folder for car images
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Health check (available before DB init)
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Noor Automobiles API is running' });
-});
-
-// Initialize database and start server
-const startServer = async () => {
+// 3. DATABASE INITIALIZATION
+// This creates your tables in the Turso Cloud if they don't exist yet
+const initializeDatabase = async () => {
   try {
-    // Initialize database (async for sql.js)
-    await initializeDatabase();
-    
-    // Load routes after database is ready
-    const authRoutes = require('./routes/auth');
-    const carsRoutes = require('./routes/cars');
-    const partsRoutes = require('./routes/parts');
-    const inquiriesRoutes = require('./routes/inquiries');
+    // Create Cars Table
+    await db.execute(`
+    CREATE TABLE IF NOT EXISTS cars (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      brand TEXT NOT NULL,
+      price REAL,
+      description TEXT,
+      image TEXT,
+      category TEXT,
+      transmission TEXT,
+      fuelType TEXT,
+      year INTEGER
+    )
+    `);
 
-    // API Routes
-    app.use('/api/auth', authRoutes);
-    app.use('/api/cars', carsRoutes);
-    app.use('/api/parts', partsRoutes);
-    app.use('/api/inquiries', inquiriesRoutes);
+    // Create Inquiries Table
+    await db.execute(`
+    CREATE TABLE IF NOT EXISTS inquiries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      carId INTEGER,
+      name TEXT,
+      email TEXT,
+      phone TEXT,
+      message TEXT,
+      status TEXT DEFAULT 'pending',
+      createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    `);
 
-    // Serve static files from React app in production
-/*    if (process.env.NODE_ENV === 'production') {
-      app.use(express.static(path.join(__dirname, '../frontend/dist')));
-      
-      app.get('*', (req, res) => {
-        res.sendFile(path.join(__dirname, '../frontend/dist/index.html'));
-      });
-    }
-*/
-    // Error handling middleware
-    app.use((err, req, res, next) => {
-      console.error(err.stack);
-      res.status(500).json({ message: 'Something went wrong!' });
-    });
-
-    // Start server
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`Server running on http://0.0.0.0:${PORT}`);
-    });
-    
+    console.log("🚀 Turso Database Connected & Tables Verified");
   } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
+    console.error("❌ Database Init Error:", error);
   }
 };
 
-startServer();
+// 4. API ROUTES
+// Note: You must update these files to use the 'db' client as well
+const authRoutes = require('./routes/auth');
+const carsRoutes = require('./routes/cars');
+const partsRoutes = require('./routes/parts');
+const inquiriesRoutes = require('./routes/inquiries');
 
-module.exports = app;
+app.use('/api/auth', authRoutes);
+app.use('/api/cars', carsRoutes);
+app.use('/api/parts', partsRoutes);
+app.use('/api/inquiries', inquiriesRoutes);
+
+// Health check endpoint for Render
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'OK', message: 'Noor Automobiles API is running on Turso' });
+});
+
+// 5. START SERVER
+const start = async () => {
+  await initializeDatabase();
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`✅ Server running on port ${PORT}`);
+  });
+};
+
+start();
