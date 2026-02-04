@@ -10,7 +10,14 @@ const initializeDatabase = async () => {
     authToken: process.env.TURSO_AUTH_TOKEN,
   });
 
-  console.log('✅ Connected to Turso database');
+  // Test connection
+  try {
+    await db.execute('SELECT 1');
+    console.log('✅ Connected to Turso database');
+  } catch (err) {
+    console.error('❌ Failed to connect to Turso:', err);
+    throw err;
+  }
 
   // Create tables
   await db.execute(`
@@ -20,7 +27,7 @@ const initializeDatabase = async () => {
       email TEXT UNIQUE NOT NULL,
       password TEXT NOT NULL,
       phone TEXT,
-      role TEXT DEFAULT 'user' CHECK(role IN ('user', 'admin')),
+      role TEXT DEFAULT 'user',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -43,7 +50,7 @@ const initializeDatabase = async () => {
       features TEXT,
       images TEXT,
       videos TEXT,
-      status TEXT DEFAULT 'available' CHECK(status IN ('available', 'sold', 'reserved', 'upcoming')),
+      status TEXT DEFAULT 'available',
       featured INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -57,7 +64,7 @@ const initializeDatabase = async () => {
       category TEXT NOT NULL,
       description TEXT,
       images TEXT,
-      availability TEXT DEFAULT 'in_stock' CHECK(availability IN ('in_stock', 'out_of_stock', 'coming_soon')),
+      availability TEXT DEFAULT 'in_stock',
       featured INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -72,15 +79,14 @@ const initializeDatabase = async () => {
       phone TEXT,
       car_id INTEGER,
       message TEXT NOT NULL,
-      status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'contacted', 'closed')),
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (car_id) REFERENCES cars(id) ON DELETE SET NULL
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
   `);
 
-  console.log('✅ Tables created');
+  console.log('✅ Tables verified');
 
-  // Check if admin exists
+  // Check/create admin user
   const adminCheck = await db.execute({
     sql: 'SELECT id FROM users WHERE email = ?',
     args: ['admin@noor.com']
@@ -93,156 +99,79 @@ const initializeDatabase = async () => {
       args: ['Muneeb Noor', 'admin@noor.com', hashedPassword, '0324-1344368', 'admin']
     });
     console.log('✅ Admin user created: admin@noor.com / admin123');
+  } else {
+    console.log('✅ Admin user exists');
   }
 
-  // Check if sample cars exist
+  // Check/create sample cars
   const carsCheck = await db.execute('SELECT COUNT(*) as count FROM cars');
-  if (carsCheck.rows[0].count === 0) {
-    const sampleCars = [
-      {
-        title: 'Toyota Supra MK4 Twin Turbo',
-        brand: 'Toyota',
-        model: 'Supra MK4',
-        year: 1998,
-        mileage: '45,000 km',
-        engine: '2JZ-GTE 3.0L Twin Turbo',
-        transmission: '6-Speed Manual',
-        fuel_type: 'Petrol',
-        color: 'Super White',
-        body_type: 'Coupe',
-        description: 'Legendary JDM sports car in pristine condition.',
-        features: JSON.stringify(['Leather Interior', 'Targa Top', 'Original BBS Wheels']),
-        images: JSON.stringify(['https://images.unsplash.com/photo-1632245889029-e406faaa34cd?w=800&q=80']),
-        videos: JSON.stringify([]),
-        status: 'available',
-        featured: 1
-      },
-      {
-        title: 'Nissan Skyline GT-R R34 V-Spec',
-        brand: 'Nissan',
-        model: 'Skyline GT-R R34',
-        year: 2002,
-        mileage: '38,000 km',
-        engine: 'RB26DETT 2.6L Twin Turbo',
-        transmission: '6-Speed Manual',
-        fuel_type: 'Petrol',
-        color: 'Bayside Blue',
-        body_type: 'Coupe',
-        description: 'The crown jewel of JDM culture.',
-        features: JSON.stringify(['ATTESA E-TS Pro AWD', 'Brembo Brakes', 'Recaro Seats']),
-        images: JSON.stringify(['https://images.unsplash.com/photo-1629897048514-3dd7414fe72a?w=800&q=80']),
-        videos: JSON.stringify([]),
-        status: 'available',
-        featured: 1
-      },
-      {
-        title: 'Honda NSX Type R',
-        brand: 'Honda',
-        model: 'NSX Type R',
-        year: 2004,
-        mileage: '28,000 km',
-        engine: 'C32B 3.2L V6 VTEC',
-        transmission: '6-Speed Manual',
-        fuel_type: 'Petrol',
-        color: 'Championship White',
-        body_type: 'Coupe',
-        description: 'The ultimate Honda engineering excellence.',
-        features: JSON.stringify(['Carbon Fiber Hood', 'Recaro Bucket Seats']),
-        images: JSON.stringify(['https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800&q=80']),
-        videos: JSON.stringify([]),
-        status: 'available',
-        featured: 1
-      }
-    ];
-
-    for (const car of sampleCars) {
-      await db.execute({
-        sql: `INSERT INTO cars (title, brand, model, year, mileage, engine, transmission, fuel_type, color, body_type, description, features, images, videos, status, featured) 
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        args: [car.title, car.brand, car.model, car.year, car.mileage, car.engine, car.transmission, car.fuel_type, car.color, car.body_type, car.description, car.features, car.images, car.videos, car.status, car.featured]
-      });
-    }
-    console.log('✅ Sample cars inserted');
+  const carCount = Number(carsCheck.rows[0].count);
+  
+  if (carCount === 0) {
+    await db.execute({
+      sql: `INSERT INTO cars (title, brand, model, year, mileage, engine, transmission, fuel_type, color, body_type, description, features, images, videos, status, featured) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        'Toyota Supra MK4 Twin Turbo', 'Toyota', 'Supra MK4', 1998, '45,000 km',
+        '2JZ-GTE 3.0L Twin Turbo', '6-Speed Manual', 'Petrol', 'Super White', 'Coupe',
+        'Legendary JDM sports car in pristine condition.',
+        JSON.stringify(['Leather Interior', 'Targa Top']),
+        JSON.stringify(['https://images.unsplash.com/photo-1632245889029-e406faaa34cd?w=800&q=80']),
+        JSON.stringify([]), 'available', 1
+      ]
+    });
+    console.log('✅ Sample car added');
+  } else {
+    console.log(`✅ ${carCount} cars exist`);
   }
 
-  // Check if sample parts exist
-  const partsCheck = await db.execute('SELECT COUNT(*) as count FROM parts');
-  if (partsCheck.rows[0].count === 0) {
-    const sampleParts = [
-      {
-        name: '2JZ-GTE Twin Turbo Engine',
-        category: 'Engine Parts',
-        description: 'Complete 2JZ-GTE engine from Toyota Supra. Fully rebuilt.',
-        images: JSON.stringify(['https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?w=800&q=80']),
-        availability: 'in_stock',
-        featured: 1
-      },
-      {
-        name: 'Brembo GT Big Brake Kit',
-        category: 'Body Parts',
-        description: '6-piston front brake kit with 380mm rotors.',
-        images: JSON.stringify(['https://images.unsplash.com/photo-1558618666-fcd25c85cd64?w=800&q=80']),
-        availability: 'in_stock',
-        featured: 1
-      },
-      {
-        name: 'Recaro Bucket Seats (Pair)',
-        category: 'Accessories',
-        description: 'Genuine Recaro SPG bucket seats with rails.',
-        images: JSON.stringify(['https://images.unsplash.com/photo-1503376780353-7e6692767b70?w=800&q=80']),
-        availability: 'in_stock',
-        featured: 1
-      }
-    ];
+  console.log('✅ Database ready');
+  return db;
+};
 
-    for (const part of sampleParts) {
-      await db.execute({
-        sql: 'INSERT INTO parts (name, category, description, images, availability, featured) VALUES (?, ?, ?, ?, ?, ?)',
-        args: [part.name, part.category, part.description, part.images, part.availability, part.featured]
-      });
-    }
-    console.log('✅ Sample parts inserted');
+const getDb = () => {
+  if (!db) {
+    throw new Error('Database not initialized. Call initializeDatabase() first.');
   }
-
-  console.log('✅ Database initialized successfully');
   return db;
 };
 
 const query = {
   all: async (sql, params = []) => {
+    const database = getDb();
     try {
-      const result = await db.execute({ sql, args: params });
+      const result = await database.execute({ sql, args: params });
       return result.rows;
     } catch (err) {
-      console.error('Query error:', err);
+      console.error('Query all error:', sql, err.message);
       return [];
     }
   },
   
   get: async (sql, params = []) => {
+    const database = getDb();
     try {
-      const result = await db.execute({ sql, args: params });
+      const result = await database.execute({ sql, args: params });
       return result.rows[0] || null;
     } catch (err) {
-      console.error('Query error:', err);
+      console.error('Query get error:', sql, err.message);
       return null;
     }
   },
   
   run: async (sql, params = []) => {
+    const database = getDb();
     try {
-      const result = await db.execute({ sql, args: params });
+      const result = await database.execute({ sql, args: params });
       return {
-        lastInsertRowid: result.lastInsertRowid,
+        lastInsertRowid: Number(result.lastInsertRowid),
         changes: result.rowsAffected
       };
     } catch (err) {
-      console.error('Query error:', err);
+      console.error('Query run error:', sql, err.message);
       throw err;
     }
   }
 };
-
-const getDb = () => db;
 
 module.exports = { initializeDatabase, getDb, query };
