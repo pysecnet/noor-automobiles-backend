@@ -1,46 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const multer = require('multer');
-const path = require('path');
-const fs = require('fs');
 const { body, validationResult } = require('express-validator');
 const { query } = require('../config/database');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
+const { upload, cloudinary } = require('../config/cloudinary');
 
-// Configure multer for file uploads
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, '../uploads/cars');
-    if (!fs.existsSync(uploadDir)) {
-      fs.mkdirSync(uploadDir, { recursive: true });
-    }
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
-  }
-});
-
-const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|webp|gif|mp4|webm|mov/;
-  const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
-  const mimetype = allowedTypes.test(file.mimetype);
-  
-  if (extname && mimetype) {
-    cb(null, true);
-  } else {
-    cb(new Error('Only images and videos are allowed'));
-  }
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: { fileSize: 100 * 1024 * 1024 }
-});
-
-// Upload files endpoint
+// Upload files endpoint (now uses Cloudinary)
 router.post('/upload', authenticateToken, isAdmin, upload.array('files', 10), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -48,10 +13,11 @@ router.post('/upload', authenticateToken, isAdmin, upload.array('files', 10), (r
     }
 
     const fileUrls = req.files.map(file => {
-      const isVideo = /mp4|webm|mov/.test(path.extname(file.originalname).toLowerCase());
+      const isVideo = file.mimetype.startsWith('video/');
       return {
-        url: `/uploads/cars/${file.filename}`,
+        url: file.path, // Cloudinary URL
         type: isVideo ? 'video' : 'image',
+        publicId: file.filename,
         originalName: file.originalname
       };
     });
@@ -242,10 +208,17 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
   const carId = req.params.id;
 
   try {
-    const car = await query.get('SELECT id FROM cars WHERE id = ?', [carId]);
+    const car = await query.get('SELECT images, videos FROM cars WHERE id = ?', [carId]);
     if (!car) {
       return res.status(404).json({ message: 'Car not found' });
     }
+
+    // Optional: Delete images from Cloudinary
+    // const images = JSON.parse(car.images || '[]');
+    // const videos = JSON.parse(car.videos || '[]');
+    // for (const url of [...images, ...videos]) {
+    //   // Extract public_id and delete from cloudinary
+    // }
 
     await query.run('DELETE FROM cars WHERE id = ?', [carId]);
     
