@@ -5,7 +5,7 @@ const { query } = require('../config/database');
 const { authenticateToken, isAdmin } = require('../middleware/auth');
 const { upload, cloudinary } = require('../config/cloudinary');
 
-// Upload files endpoint (now uses Cloudinary)
+// Upload files endpoint
 router.post('/upload', authenticateToken, isAdmin, upload.array('files', 10), (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
@@ -15,7 +15,7 @@ router.post('/upload', authenticateToken, isAdmin, upload.array('files', 10), (r
     const fileUrls = req.files.map(file => {
       const isVideo = file.mimetype.startsWith('video/');
       return {
-        url: file.path, // Cloudinary URL
+        url: file.path,
         type: isVideo ? 'video' : 'image',
         publicId: file.filename,
         originalName: file.originalname
@@ -26,6 +26,26 @@ router.post('/upload', authenticateToken, isAdmin, upload.array('files', 10), (r
   } catch (error) {
     console.error('Upload error:', error);
     res.status(500).json({ message: 'Error uploading files' });
+  }
+});
+
+// Reorder cars (admin only) - MUST BE BEFORE /:id route
+router.put('/reorder', authenticateToken, isAdmin, async (req, res) => {
+  const { carIds } = req.body;
+  
+  if (!carIds || !Array.isArray(carIds)) {
+    return res.status(400).json({ message: 'carIds array is required' });
+  }
+
+  try {
+    for (let i = 0; i < carIds.length; i++) {
+      await query.run('UPDATE cars SET display_order = ? WHERE id = ?', [i, carIds[i]]);
+    }
+    
+    res.json({ message: 'Cars reordered successfully' });
+  } catch (error) {
+    console.error('Error reordering cars:', error);
+    res.status(500).json({ message: 'Server error reordering cars' });
   }
 });
 
@@ -58,11 +78,11 @@ router.get('/', async (req, res) => {
 
     if (search) {
       sql += ' AND (title LIKE ? OR brand LIKE ? OR model LIKE ? OR description LIKE ?)';
-      const searchTerm = `%${search}%`;
+      const searchTerm = '%' + search + '%';
       params.push(searchTerm, searchTerm, searchTerm, searchTerm);
     }
 
-    sql += ' ORDER BY featured DESC, created_at DESC';
+    sql += ' ORDER BY featured DESC, display_order ASC, created_at DESC';
 
     const cars = await query.all(sql, params);
     
@@ -129,15 +149,15 @@ router.post('/', authenticateToken, isAdmin, [
   } = req.body;
 
   try {
-    const result = await query.run(`
-      INSERT INTO cars (title, brand, model, year, mileage, engine, transmission, fuel_type, color, body_type, description, features, images, videos, status, featured)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `, [
-      title, brand, model, year, mileage || null, engine || null, transmission || null,
-      fuel_type || null, color || null, body_type || null, description || null,
-      JSON.stringify(features || []), JSON.stringify(images || []), JSON.stringify(videos || []),
-      status || 'available', featured ? 1 : 0
-    ]);
+    const result = await query.run(
+      'INSERT INTO cars (title, brand, model, year, mileage, engine, transmission, fuel_type, color, body_type, description, features, images, videos, status, featured, display_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        title, brand, model, year, mileage || null, engine || null, transmission || null,
+        fuel_type || null, color || null, body_type || null, description || null,
+        JSON.stringify(features || []), JSON.stringify(images || []), JSON.stringify(videos || []),
+        status || 'available', featured ? 1 : 0, Date.now()
+      ]
+    );
 
     const newCar = await query.get('SELECT * FROM cars WHERE id = ?', [result.lastInsertRowid]);
     newCar.features = JSON.parse(newCar.features || '[]');
@@ -189,7 +209,7 @@ router.put('/:id', authenticateToken, isAdmin, async (req, res) => {
     updates.push('updated_at = CURRENT_TIMESTAMP');
     params.push(carId);
     
-    await query.run(`UPDATE cars SET ${updates.join(', ')} WHERE id = ?`, params);
+    await query.run('UPDATE cars SET ' + updates.join(', ') + ' WHERE id = ?', params);
 
     const updatedCar = await query.get('SELECT * FROM cars WHERE id = ?', [carId]);
     updatedCar.features = JSON.parse(updatedCar.features || '[]');
@@ -212,13 +232,6 @@ router.delete('/:id', authenticateToken, isAdmin, async (req, res) => {
     if (!car) {
       return res.status(404).json({ message: 'Car not found' });
     }
-
-    // Optional: Delete images from Cloudinary
-    // const images = JSON.parse(car.images || '[]');
-    // const videos = JSON.parse(car.videos || '[]');
-    // for (const url of [...images, ...videos]) {
-    //   // Extract public_id and delete from cloudinary
-    // }
 
     await query.run('DELETE FROM cars WHERE id = ?', [carId]);
     
